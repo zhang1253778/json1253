@@ -10,14 +10,66 @@ import sys
 from typing import Any
 
 
-_COMMENT_RE = re.compile(r"//.*?$|/\*.*?\*/", re.MULTILINE | re.DOTALL)
 _UNQUOTED_KEY_RE = re.compile(r'([\{,]\s*)([A-Za-z_][A-Za-z0-9_\-]*)(\s*:)')
 _TRAILING_COMMA_RE = re.compile(r",\s*([}\]])")
 
 
 def strip_comments(text: str) -> str:
     """Remove // and /* */ comments."""
-    return _COMMENT_RE.sub("", text)
+    result: list[str] = []
+    i = 0
+    n = len(text)
+    in_single = False
+    in_double = False
+    escape = False
+
+    while i < n:
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < n else ""
+
+        if in_single or in_double:
+            result.append(ch)
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif in_single and ch == "'":
+                in_single = False
+            elif in_double and ch == '"':
+                in_double = False
+            i += 1
+            continue
+
+        if ch == "'":
+            in_single = True
+            result.append(ch)
+            i += 1
+            continue
+
+        if ch == '"':
+            in_double = True
+            result.append(ch)
+            i += 1
+            continue
+
+        if ch == "/" and nxt == "/":
+            i += 2
+            while i < n and text[i] not in "\r\n":
+                i += 1
+            continue
+
+        if ch == "/" and nxt == "*":
+            i += 2
+            while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
+                i += 1
+            if i + 1 < n:
+                i += 2
+            continue
+
+        result.append(ch)
+        i += 1
+
+    return "".join(result)
 
 
 def quote_unquoted_keys(text: str) -> str:
@@ -69,10 +121,24 @@ def convert_single_quotes(text: str) -> str:
             while i < n:
                 c = text[i]
                 if escaped:
-                    converted.append(c)
+                    if c == "'":
+                        converted.append("'")
+                    elif c == '"':
+                        converted.append('\\"')
+                    elif c in "\\/bfnrt":
+                        converted.append("\\")
+                        converted.append(c)
+                    elif c == "u" and i + 4 < n and all(
+                        ch in "0123456789abcdefABCDEF" for ch in text[i + 1 : i + 5]
+                    ):
+                        converted.append("\\u")
+                        converted.extend(text[i + 1 : i + 5])
+                        i += 4
+                    else:
+                        converted.append("\\\\")
+                        converted.append(c)
                     escaped = False
                 elif c == "\\":
-                    converted.append("\\")
                     escaped = True
                 elif c == "'":
                     converted.append('"')
